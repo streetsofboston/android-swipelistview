@@ -89,5 +89,6 @@ public interface SwipeListViewListener {
      * @return type
      */
     int onChangeSwipeMode(int position);
-
+    
+    void onPassSnapPosition(int position, boolean after, boolean snapExecuted);
 }

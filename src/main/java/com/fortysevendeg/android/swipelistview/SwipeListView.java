@@ -106,13 +106,15 @@ public class SwipeListView extends ListView {
     /**
      * Internal listener for common swipe events
      */
-    private BaseSwipeListViewListener swipeListViewListener;
+    private SwipeListViewListener swipeListViewListener;
 
     /**
      * Internal touch listener
      */
     private SwipeListViewTouchListener touchListener;
 
+    private int snapAtPosition;
+    
     /**
      * If you create a View programmatically you need send back and front identifier
      * @param context Context
@@ -171,9 +173,10 @@ public class SwipeListView extends ListView {
             swipeCloseAllItemsWhenMoveList = styled.getBoolean(R.styleable.SwipeListView_swipeCloseAllItemsWhenMoveList, true);
             swipeFrontView = styled.getResourceId(R.styleable.SwipeListView_swipeFrontView, 0);
             swipeBackView = styled.getResourceId(R.styleable.SwipeListView_swipeBackView, 0);
+            styled.recycle();
         }
 
-        if (swipeFrontView == 0 || swipeBackView == 0) {
+        if (!isInEditMode() && (swipeFrontView == 0 || swipeBackView == 0)) {
             throw new RuntimeException("Missed attribute swipeFrontView or swipeBackView");
         }
 
@@ -336,13 +339,19 @@ public class SwipeListView extends ListView {
         }
         return SWIPE_MODE_DEFAULT;
     }
+    
+    protected void onPassSnapPosition(int position, boolean after, boolean snapExecuted) {
+        if (swipeListViewListener != null) {
+            swipeListViewListener.onPassSnapPosition(position, after, snapExecuted);
+        }
+    }
 
     /**
      * Sets the Listener
      *
      * @param swipeListViewListener Listener
      */
-    public void setSwipeListViewListener(BaseSwipeListViewListener swipeListViewListener) {
+    public void setSwipeListViewListener(SwipeListViewListener swipeListViewListener) {
         this.swipeListViewListener = swipeListViewListener;
     }
 
@@ -506,4 +515,8 @@ public class SwipeListView extends ListView {
         }
     }
 
+    public void setSnapAtPosition(int position) {
+    	this.snapAtPosition = position;
+		touchListener.setSnapAtPosition(snapAtPosition);
+    }
 }

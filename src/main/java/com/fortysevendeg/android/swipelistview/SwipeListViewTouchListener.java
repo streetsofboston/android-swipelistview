@@ -20,22 +20,30 @@
 
 package com.fortysevendeg.android.swipelistview;
 
-import android.graphics.Rect;
-import android.os.Handler;
-import android.view.*;
-import android.widget.AbsListView;
-import android.widget.ListView;
-import com.nineoldandroids.animation.Animator;
-import com.nineoldandroids.animation.AnimatorListenerAdapter;
-import com.nineoldandroids.animation.ValueAnimator;
+import static com.nineoldandroids.view.ViewHelper.setAlpha;
+import static com.nineoldandroids.view.ViewHelper.setTranslationX;
+import static com.nineoldandroids.view.ViewPropertyAnimator.animate;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import static com.nineoldandroids.view.ViewHelper.setAlpha;
-import static com.nineoldandroids.view.ViewHelper.setTranslationX;
-import static com.nineoldandroids.view.ViewPropertyAnimator.animate;
+import android.graphics.Rect;
+import android.os.Handler;
+import android.view.MotionEvent;
+import android.view.VelocityTracker;
+import android.view.View;
+import android.view.ViewConfiguration;
+import android.view.ViewGroup;
+import android.view.animation.Animation;
+import android.view.animation.OvershootInterpolator;
+import android.view.animation.Transformation;
+import android.widget.AbsListView;
+import android.widget.ListView;
+
+import com.nineoldandroids.animation.Animator;
+import com.nineoldandroids.animation.AnimatorListenerAdapter;
+import com.nineoldandroids.animation.ValueAnimator;
 
 /**
  * Touch listener impl for the SwipeListView
@@ -86,6 +94,21 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
     private List<Boolean> openedRight = new ArrayList<Boolean>();
     private boolean listViewMoving;
 
+    private int snapAtPosition;
+    private boolean snapPositionPassed;
+    
+    private boolean swipeStarted;
+    private float animatedDeltaX;
+    private Handler handler;
+	private Animation moveSlowlyToDeltaXAnimation = new Animation() {
+		@Override
+		protected void applyTransformation(float interpolatedTime, Transformation t) {
+			if (swiping) {
+				move(interpolatedTime * animatedDeltaX);
+			}
+		}
+	};
+    
     /**
      * Constructor
      * @param swipeListView SwipeListView
@@ -102,6 +125,7 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
         configShortAnimationTime = swipeListView.getContext().getResources().getInteger(android.R.integer.config_shortAnimTime);
         animationTime = configShortAnimationTime;
         this.swipeListView = swipeListView;
+        this.handler = new Handler();
     }
 
     /**
@@ -141,7 +165,7 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
      */
     private void setBackView(View backView) {
         this.backView = backView;
-        backView.setOnClickListener(new View.OnClickListener() {
+        this.backView.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 swipeListView.onClickBackView(downPosition);
@@ -261,6 +285,7 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
                 openedRight.add(false);
             }
         }
+    	snapPositionPassed = false;
     }
 
     /**
@@ -309,10 +334,13 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
      * @param position Position of list
      */
     private void generateAnimate(final View view, final boolean swap, final boolean swapRight, final int position) {
-        if (swipeCurrentAction == SwipeListView.SWIPE_ACTION_REVEAL) {
+        if (snapAtPosition > 0) {
+        	generateSnapAnimate(view, swapRight, position);
+        }
+        else if (swipeCurrentAction == SwipeListView.SWIPE_ACTION_REVEAL) {
             generateRevealAnimate(view, swap, swapRight, position);
         }
-        if (swipeCurrentAction == SwipeListView.SWIPE_ACTION_DISMISS) {
+        else if (swipeCurrentAction == SwipeListView.SWIPE_ACTION_DISMISS) {
             generateDismissAnimate(parentView, swap, swapRight, position);
         }
     }
@@ -394,6 +422,36 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
                                 swipeListView.onClosed(position, openedRight.get(position));
                             }
                         }
+                    }
+                });
+    }
+
+    private void generateSnapAnimate(final View view, final boolean swapRight, final int position) {
+        int moveTo = 0;
+        if (opened.get(position)) {
+        	moveTo = openedRight.get(position) ? (int) (viewWidth - rightOffset) : (int) (-viewWidth + leftOffset);
+        }
+        
+        final boolean executeSnap;
+        if (snapPositionPassed) {
+        	snapPositionPassed = false;
+        	executeSnap = true;
+        } 
+        else {
+        	executeSnap = false;
+        }
+
+        animate(view)
+                .translationX(moveTo)
+                .setDuration(animationTime)
+                .setInterpolator(new OvershootInterpolator())
+                .setListener(new AnimatorListenerAdapter() {
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+                        swipeListView.resetScrolling();
+                        if (executeSnap) {
+                        	swipeListView.onPassSnapPosition(position, false, true);
+                        } 
                     }
                 });
     }
@@ -534,13 +592,14 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
                     swap = true;
                     swapRight = deltaX > 0;
                 }
+                
                 generateAnimate(frontView, swap, swapRight, downPosition);
 
                 velocityTracker.recycle();
                 velocityTracker = null;
                 downX = 0;
                 // change clickable front view
-                if (swap) {
+                if (swap && (snapAtPosition == 0)) {
                     frontView.setClickable(opened.get(downPosition));
                     frontView.setLongClickable(opened.get(downPosition));
                 }
@@ -548,6 +607,7 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
                 backView = null;
                 this.downPosition = ListView.INVALID_POSITION;
                 swiping = false;
+                swipeStarted = false;
                 break;
             }
 
@@ -588,6 +648,9 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
                     }
                 }
                 if (deltaMode > slop && swipeCurrentAction == SwipeListView.SWIPE_ACTION_NONE && velocityY < velocityX) {
+                	if (!swiping) {
+                		swipeStarted = true;
+                	}
                     swiping = true;
                     boolean swipingRight = (deltaX > 0);
                     if (opened.get(downPosition)) {
@@ -613,13 +676,15 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
                             (motionEvent.getActionIndex()
                                     << MotionEvent.ACTION_POINTER_INDEX_SHIFT));
                     swipeListView.onTouchEvent(cancelEvent);
+                    cancelEvent.recycle();
                 }
 
                 if (swiping) {
                     if (opened.get(downPosition)) {
                         deltaX += openedRight.get(downPosition) ? viewWidth - rightOffset : -viewWidth + leftOffset;
                     }
-                    move(deltaX);
+                    
+                    moveTo(deltaX);
                     return true;
                 }
                 break;
@@ -628,12 +693,49 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
         return false;
     }
 
+	private void moveTo(float deltaX) {
+		animatedDeltaX = deltaX;
+
+		if (swipeStarted) {
+			swipeStarted = false;
+			moveSlowlyToDeltaX();
+		}
+		else if (!moveSlowlyToDeltaXAnimation.hasStarted() || moveSlowlyToDeltaXAnimation.hasEnded()) {
+		    move(deltaX);
+		}
+	}
+
+	private void moveSlowlyToDeltaX() {
+		moveSlowlyToDeltaXAnimation.cancel();
+
+		moveSlowlyToDeltaXAnimation.setDuration(100);
+		moveSlowlyToDeltaXAnimation.setStartTime(Animation.START_ON_FIRST_FRAME);
+		
+		moveSlowlyToDeltaXAnimation.getTransformation(System.currentTimeMillis(), null);
+		handler.postDelayed(new Runnable() {
+			@Override
+			public void run() {
+				if (swiping && moveSlowlyToDeltaXAnimation.hasStarted() && !moveSlowlyToDeltaXAnimation.hasEnded()) {
+					moveSlowlyToDeltaXAnimation.getTransformation(System.currentTimeMillis(), null);
+					handler.postDelayed(this, 5);
+				}
+			}
+		}, 5);
+	}
+
     /**
      * Moves the view
      * @param deltaX delta
      */
     public void move(float deltaX) {
         swipeListView.onMove(downPosition, deltaX);
+        if (snapAtPosition > 0) {
+            boolean snapPassed = deltaX > snapAtPosition;
+            if (snapPassed != snapPositionPassed) {
+            	snapPositionPassed = snapPassed;
+            	swipeListView.onPassSnapPosition(downPosition, snapPositionPassed, false);
+            }
+        }
         if (swipeCurrentAction == SwipeListView.SWIPE_ACTION_DISMISS) {
             setTranslationX(parentView, deltaX);
             setAlpha(parentView, Math.max(0f, Math.min(1f,
@@ -715,4 +817,7 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
         animator.start();
     }
 
+    public void setSnapAtPosition(int position) {
+    	this.snapAtPosition = position;
+    }
 }
