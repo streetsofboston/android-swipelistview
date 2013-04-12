@@ -104,7 +104,11 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
 		@Override
 		protected void applyTransformation(float interpolatedTime, Transformation t) {
 			if (swiping) {
-				move(interpolatedTime * animatedDeltaX);
+				float deltaX = animatedDeltaX * interpolatedTime;
+                if (opened.get(downPosition)) {
+                    deltaX += openedRight.get(downPosition) ? viewWidth - rightOffset : -viewWidth + leftOffset;
+                }
+				move(deltaX);
 			}
 		}
 	};
@@ -680,10 +684,6 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
                 }
 
                 if (swiping) {
-                    if (opened.get(downPosition)) {
-                        deltaX += openedRight.get(downPosition) ? viewWidth - rightOffset : -viewWidth + leftOffset;
-                    }
-                    
                     moveTo(deltaX);
                     return true;
                 }
@@ -701,6 +701,10 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
 			moveSlowlyToDeltaX();
 		}
 		else if (!moveSlowlyToDeltaXAnimation.hasStarted() || moveSlowlyToDeltaXAnimation.hasEnded()) {
+            if (opened.get(downPosition)) {
+                deltaX += openedRight.get(downPosition) ? viewWidth - rightOffset : -viewWidth + leftOffset;
+            }
+            
 		    move(deltaX);
 		}
 	}
@@ -708,7 +712,7 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
 	private void moveSlowlyToDeltaX() {
 		moveSlowlyToDeltaXAnimation.cancel();
 
-		moveSlowlyToDeltaXAnimation.setDuration(100);
+		moveSlowlyToDeltaXAnimation.setDuration(150);
 		moveSlowlyToDeltaXAnimation.setStartTime(Animation.START_ON_FIRST_FRAME);
 		
 		moveSlowlyToDeltaXAnimation.getTransformation(System.currentTimeMillis(), null);
@@ -727,7 +731,7 @@ public class SwipeListViewTouchListener implements View.OnTouchListener {
      * Moves the view
      * @param deltaX delta
      */
-    public void move(float deltaX) {
+    public void move(float deltaX) {	
         swipeListView.onMove(downPosition, deltaX);
         if (snapAtPosition > 0) {
             boolean snapPassed = deltaX > snapAtPosition;
